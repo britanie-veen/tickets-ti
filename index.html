@@ -67,3 +67,188 @@
 </head>
 <body>
 <header>
+  <h1>Tickets TI — CeroCero</h1>
+  <span id="last-update">Cargando...</span>
+</header>
+<div class="container">
+  <div class="stats">
+    <div class="stat total"><div class="label">Total tickets</div><div class="value" id="stat-total">—</div></div>
+    <div class="stat pendiente"><div class="label">Pendientes</div><div class="value" id="stat-pendiente">—</div></div>
+    <div class="stat hecho"><div class="label">Resueltos</div><div class="value" id="stat-hecho">—</div></div>
+    <div class="stat alta"><div class="label">Prioridad alta</div><div class="value" id="stat-alta">—</div></div>
+  </div>
+  <div class="filters">
+    <input type="text" id="search" placeholder="Buscar por nombre, descripción..." />
+    <div><label>Estatus</label><br>
+      <select id="filtro-estatus">
+        <option value="">Todos</option>
+        <option value="PENDIENTE">Pendiente</option>
+        <option value="HECHO">Hecho</option>
+      </select></div>
+    <div><label>Prioridad</label><br>
+      <select id="filtro-prioridad">
+        <option value="">Todas</option>
+        <option value="Alta">Alta</option>
+        <option value="Media">Media</option>
+        <option value="Baja">Baja</option>
+      </select></div>
+    <div><label>Departamento</label><br><select id="filtro-depto"><option value="">Todos</option></select></div>
+    <div><label>Tipo</label><br><select id="filtro-tipo"><option value="">Todos</option></select></div>
+    <button class="btn-reset" onclick="resetFiltros()">Limpiar</button>
+  </div>
+  <div class="error-banner" id="error-banner"></div>
+  <div class="count-bar" id="count-bar"></div>
+  <div class="ticket-header">
+    <span>Fecha</span><span>Ticket</span><span>Tipo</span><span>Prioridad</span><span>Estatus</span>
+  </div>
+  <div class="tickets-list" id="lista">
+    <div class="loading"><div class="loading-spinner"></div><br>Cargando tickets...</div>
+  </div>
+</div>
+<script>
+const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vStaWNncH6X4Zr7Ku8B7vLlJhHklxoyPGarWKdsEeZYGw0fPld-U3MkkQUrCGAxgpQHlLhqft3iYHpk/pub?output=csv';
+let tickets = [];
+
+function normalizaTipo(raw) {
+  const r = (raw || '').toLowerCase();
+  if (r.includes('hardware')) return 'Hardware';
+  if (r.includes('software')) return 'Software';
+  if (r.includes('acceso')) return 'Accesos';
+  if (r.includes('internet')) return 'Internet';
+  if (r.includes('soporte')) return 'Soporte';
+  return 'Otro';
+}
+
+function normalizaDepto(raw) {
+  return (raw || '').trim();
+}
+
+function parseCSV(text) {
+  const rows = [];
+  const lines = text.split('\n');
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const cols = [];
+    let cur = '', inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') {
+        if (inQ && line[i+1] === '"') { cur += '"'; i++; }
+        else inQ = !inQ;
+      } else if (c === ',' && !inQ) {
+        cols.push(cur); cur = '';
+      } else { cur += c; }
+    }
+    cols.push(cur);
+    rows.push(cols);
+  }
+  return rows;
+}
+
+async function loadTickets() {
+  try {
+    const res = await fetch(CSV_URL);
+    if (!res.ok) throw new Error('Error al cargar');
+    const text = await res.text();
+    const rows = parseCSV(text);
+    if (rows.length < 2) throw new Error('Sin datos');
+    tickets = rows.slice(1).filter(r => r[1] && r[1].trim()).map(r => ({
+      fecha: r[0] || '',
+      nombre: (r[1] || '').trim(),
+      depto: normalizaDepto(r[3]),
+      tipo: normalizaTipo(r[4]),
+      desc: (r[5] || '').trim(),
+      prioridad: (r[6] || 'Media').trim(),
+      estatus: ((r[8] || 'PENDIENTE').trim().toUpperCase())
+    }));
+    const now = new Date();
+    document.getElementById('last-update').textContent =
+      now.toLocaleString('es-MX', {weekday:'long', day:'numeric', month:'long', hour:'2-digit', minute:'2-digit'});
+    initFiltros();
+    render();
+  } catch (e) {
+    const banner = document.getElementById('error-banner');
+    banner.style.display = 'block';
+    banner.textContent = 'No se pudo conectar al Google Sheet. Verifica que el archivo esté compartido públicamente.';
+    document.getElementById('lista').innerHTML = '<div class="empty">Error al cargar tickets</div>';
+  }
+}
+
+function tipoClass(tipo) {
+  const t = tipo.toLowerCase();
+  if (t === 'hardware') return 'tipo-hardware';
+  if (t === 'software') return 'tipo-software';
+  if (t === 'accesos') return 'tipo-accesos';
+  if (t === 'internet') return 'tipo-internet';
+  if (t === 'soporte') return 'tipo-soporte';
+  return 'tipo-otro';
+}
+
+function initFiltros() {
+  const deptos = [...new Set(tickets.map(t => t.depto).filter(Boolean))].sort();
+  const sel = document.getElementById('filtro-depto');
+  sel.innerHTML = '<option value="">Todos</option>';
+  deptos.forEach(d => { const o = document.createElement('option'); o.value = d; o.textContent = d; sel.appendChild(o); });
+  const tipos = [...new Set(tickets.map(t => t.tipo))].sort();
+  const sel2 = document.getElementById('filtro-tipo');
+  sel2.innerHTML = '<option value="">Todos</option>';
+  tipos.forEach(t => { const o = document.createElement('option'); o.value = t; o.textContent = t; sel2.appendChild(o); });
+}
+
+function render() {
+  const search = document.getElementById('search').value.toLowerCase();
+  const estatus = document.getElementById('filtro-estatus').value;
+  const prioridad = document.getElementById('filtro-prioridad').value;
+  const depto = document.getElementById('filtro-depto').value;
+  const tipo = document.getElementById('filtro-tipo').value;
+  const filtrados = tickets.filter(t => {
+    if (estatus && t.estatus !== estatus) return false;
+    if (prioridad && t.prioridad !== prioridad) return false;
+    if (depto && t.depto !== depto) return false;
+    if (tipo && t.tipo !== tipo) return false;
+    if (search && !t.nombre.toLowerCase().includes(search) &&
+        !t.desc.toLowerCase().includes(search) &&
+        !t.depto.toLowerCase().includes(search)) return false;
+    return true;
+  }).slice().reverse();
+  document.getElementById('stat-total').textContent = tickets.length;
+  document.getElementById('stat-pendiente').textContent = tickets.filter(t => t.estatus === 'PENDIENTE').length;
+  document.getElementById('stat-hecho').textContent = tickets.filter(t => t.estatus === 'HECHO').length;
+  document.getElementById('stat-alta').textContent = tickets.filter(t => t.prioridad === 'Alta' && t.estatus === 'PENDIENTE').length;
+  document.getElementById('count-bar').innerHTML = `Mostrando <strong>${filtrados.length}</strong> de ${tickets.length} tickets`;
+  const lista = document.getElementById('lista');
+  if (filtrados.length === 0) { lista.innerHTML = '<div class="empty">No hay tickets con esos filtros</div>'; return; }
+  lista.innerHTML = filtrados.map(t => `
+    <div class="ticket ${t.estatus.toLowerCase()}-row">
+      <div class="fecha">${t.fecha}</div>
+      <div>
+        <div class="nombre">${t.nombre}</div>
+        <div class="descripcion">${t.desc}</div>
+        <div class="depto">${t.depto}</div>
+      </div>
+      <div><span class="tipo-badge ${tipoClass(t.tipo)}">${t.tipo}</span></div>
+      <div class="prioridad ${t.prioridad.toLowerCase()}">${t.prioridad}</div>
+      <div><span class="estatus ${t.estatus.toLowerCase()}">${t.estatus}</span></div>
+    </div>
+  `).join('');
+}
+
+function resetFiltros() {
+  document.getElementById('search').value = '';
+  document.getElementById('filtro-estatus').value = '';
+  document.getElementById('filtro-prioridad').value = '';
+  document.getElementById('filtro-depto').value = '';
+  document.getElementById('filtro-tipo').value = '';
+  render();
+}
+
+document.getElementById('search').addEventListener('input', render);
+document.getElementById('filtro-estatus').addEventListener('change', render);
+document.getElementById('filtro-prioridad').addEventListener('change', render);
+document.getElementById('filtro-depto').addEventListener('change', render);
+document.getElementById('filtro-tipo').addEventListener('change', render);
+
+loadTickets();
+</script>
+</body>
+</html>
